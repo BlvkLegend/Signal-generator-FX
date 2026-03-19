@@ -1,1 +1,88 @@
-import os\nimport time\nimport numpy as np\nimport pandas as pd\nimport talib as ta\nfrom tvDatafeed import TvDatafeed\nimport requests\n\nclass TradeSignal:\n    def __init__(self, symbol, timeframe):\n        self.symbol = symbol\n        self.timeframe = timeframe\n        self.data = None\n        self.signals = []\n        self.telegram_key = os.getenv('TELEGRAM_KEY')\n        self.telegram_chat = os.getenv('TELEGRAM_CHAT')\n\n    def fetch_candles(self, num_candles):\n        tf = '15'  # 15-minute interval\n        tv = TvDatafeed('your_username', 'your_password')\n        self.data = tv.get_hist(self.symbol, self.timeframe, n_bars=num_candles)\n        return self.data\n\n    def calculate_indicators(self):\n        self.data['SMA20'] = ta.SMA(self.data['close'], timeperiod=20)\n        self.data['SMA50'] = ta.SMA(self.data['close'], timeperiod=50)\n        self.data['ATR'] = ta.ATR(self.data['high'], self.data['low'], self.data['close'], timeperiod=14)\n        # Add more indicators as needed\n\n    def generate_signals(self):\n        for index in range(len(self.data)):\n            if self.data['SMA20'].iloc[index] > self.data['SMA50'].iloc[index]:\n                self.signals.append('buy')\n            elif self.data['SMA20'].iloc[index] < self.data['SMA50'].iloc[index]:\n                self.signals.append('sell')\n            else:\n                self.signals.append('hold')\n\n    def check_liquidity_grab(self):\n        # Implement liquidity grab detection logic\n        pass\n\n    def check_volatility(self):\n        # Implement volatility filters logic\n        pass\n\n    def check_session_filters(self):\n        # Implement session filters logic\n        pass\n\n    def detect_fvg(self):\n        # Implement FVG detection logic\n        pass\n\n    def detect_compression(self):\n        # Implement compression detection logic\n        pass\n\n    def send_telegram_notification(self, message):\n        url = f'https://api.telegram.org/bot{self.telegram_key}/sendMessage'\n        data = {'chat_id': self.telegram_chat, 'text': message}\n        response = requests.post(url, data=data)\n        return response.json()\n\n    def run(self):\n        self.fetch_candles(500)\n        self.calculate_indicators()\n        self.generate_signals()\n        # Add checks for liquidity grab, volatility, and session filters\n        if self.signals[-1] == 'buy':\n            self.send_telegram_notification('Buy signal generated!')\n        elif self.signals[-1] == 'sell':\n            self.send_telegram_notification('Sell signal generated!')\n        else:\n            self.send_telegram_notification('No signal generated.')\n\n# Example usage\nif __name__ == '__main__':\n    trader = TradeSignal('EURUSD', '15m')\n    trader.run()
+# ────────────────────────────────────────────────
+#    Forex Signal Generator with Telegram Integration
+# ────────────────────────────────────────────────
+
+import requests
+import pandas as pd
+from datetime import datetime
+from tvDatafeed import TvDatafeed, Interval
+import json
+
+# Load configuration
+try:
+    with open('config.json', 'r') as f:
+        config = json.load(f)
+except:
+    config = {
+        'telegram_api_key': '7738815469:AAGZ9CinWjcfp5ntRGiludabkRHRRgdnwiM',
+        'chat_id': '942718846',
+        'forex_pairs': ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCHF']
+    }
+
+TELEGRAM_KEY = config['telegram_api_key']
+TELEGRAM_CHAT = config['chat_id']
+TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_KEY}/sendMessage"
+FOREX_PAIRS = config['forex_pairs']
+
+class TradeSignal:
+    def __init__(self, pair, direction, entry, sl, tp):
+        self.pair = pair
+        self.direction = direction
+        self.entry = entry
+        self.sl = sl
+        self.tp = tp
+        self.timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+    def to_telegram_format(self):
+        return f"🎯 {self.pair} | {self.direction} | Entry: {self.entry:.5f} | SL: {self.sl:.5f} | TP: {self.tp:.5f} | {self.timestamp}"
+
+def fetch_candles(pair):
+    try:
+        tv = TvDatafeed()
+        df = tv.get_hist(pair, 'FX', Interval.in_15_minute, n_bars=500)
+        return df
+    except Exception as e:
+        print(f"Error fetching {pair}: {e}")
+        return None
+
+def generate_signal(pair, df):
+    if df is None or len(df) < 60:
+        return None
+    
+    try:
+        recent = df.iloc[-1]
+        highs = df['high'].iloc[-22:-2]
+        lows = df['low'].iloc[-22:-2]
+        range_high = highs.max()
+        range_low = lows.min()
+        pip_size = 0.01 if 'JPY' in pair else 0.0001
+        
+        if recent['high'] > range_high and recent['close'] < range_high:
+            return TradeSignal(pair, 'SELL', recent['close'], 
+                             recent['close'] + (10 * pip_size), 
+                             recent['close'] - (30 * pip_size))
+        elif recent['low'] < range_low and recent['close'] > range_low:
+            return TradeSignal(pair, 'BUY', recent['close'], 
+                             recent['close'] - (10 * pip_size), 
+                             recent['close'] + (30 * pip_size))
+        return None
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+def send_telegram_signal(signal):
+    try:
+        payload = {"chat_id": TELEGRAM_CHAT, "text": signal.to_telegram_format()}
+        requests.post(TELEGRAM_URL, json=payload, timeout=10)
+        return True
+    except:
+        return False
+
+if __name__ == '__main__':
+    print("🚀 Forex Signal Generator Started")
+    for pair in FOREX_PAIRS:
+        df = fetch_candles(pair)
+        signal = generate_signal(pair, df)
+        if signal:
+            send_telegram_signal(signal)
+            print(f"✅ {pair}: {signal.direction}")
