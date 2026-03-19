@@ -2,4 +2,3 @@ pandas
 numpy
 tvDatafeed
 requests
-TA-Lib
